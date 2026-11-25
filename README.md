@@ -2,7 +2,7 @@
 
 **Universal, Model-Agnostic Pure Seeded-OM-2 Zero-CUDA Inference Engine for NVIDIA Blackwell (DGX Spark GB10, SM 12.1).**
 
-`omega-engine` is a single **`811 KB` static AArch64 ELF** (`ldd: not a dynamic executable` — zero `libcuda.so.1`, zero cuBLAS/cuDNN, zero `libc`, zero C, zero Rust, zero Python) compiled directly from pinned `omega-mv` (`om/gpu/engine/`) by the self-hosted seeded compiler (`seed/out/omc`).
+`omega-engine` is a single **`988 KB` static AArch64 ELF** (`ldd: not a dynamic executable` — zero `libcuda.so.1`, zero cuBLAS/cuDNN, zero `libc`, zero C, zero Rust, zero Python) compiled directly from pinned `omega-mv` (`om/gpu/engine/`) by the self-hosted seeded compiler (`seed/out/omc`).
 
 Instead of hardcoding a single model's dimensions or tensor byte offsets, `omega-engine` reads any standard HuggingFace `config.json`, dynamically indexes safetensors headers across all three checkpoint layouts (up to `163,840` tensors via O(1) FNV-1a hash table), emits **shape-specialized SM121 Blackwell SASS machine code at runtime**, quantizes BF16 or FP8 weights to block-32 W4 on GPU, runs **Full-APU (20 ARMv9 CPU cores + 48 Blackwell SMs = 6,164 cores simultaneously)** with **Live Arboris online co-activation expert prefetching enabled by default**, and serves an OpenAI-compatible HTTP API with a 128K context window.
 
@@ -21,9 +21,9 @@ Instead of hardcoding a single model's dimensions or tensor byte offsets, `omega
    - Omega per-layer packed (`outside.safetensors` + `layers-L.safetensors`)
 3. **`emit_generic.om` & `emit_qwen4.om` — Runtime Shape-Parameterized SM121 SASS Generator:**
    Emits specialized SM121 SASS kernels for the loaded `ModelSpec`:
-   - `uW4Gemv4R` (4 KiB streaming SMEM W4 GEMV for `K % 1024 == 0`) & `uW4GemvAnyK` (universal W4 block-32 GEMV for any `K % 128 == 0`, any `N`)
+   - `uW4Gemv4R` (4 KiB streaming SMEM W4 GEMV for `K % 1024 == 0`), `uW4Gemv4R512` (2 KiB streaming SMEM 4-row/warp `LDG.E.64` W4 GEMV for any `K % 512 == 0`), `uW4GemmB8` (true batched `B=8` W4 GEMM reading weights once across 8 streams), & `uW4GemvAnyK` (universal W4 block-32 GEMV for any `K % 128 == 0`, any `N`)
    - `uBf16ToW4Quant` (on-GPU BF16 → W4 block-32 quantizer for any `K % 64 == 0`, any `N`) & `qFp8ToW4B32Quant` (on-GPU FP8 block-128 → W4 block-32)
-   - `uBf16Gemv1R` (`K % 256 == 0`) & `uBf16GemvAnyK` (universal BF16 GEMV for any `K % 64 == 0`)
+   - `uBf16Gemv4R` (4-row/warp `LDG.E.64` SMEM BF16 GEMV for `K % 128 == 0`), `uBf16GemmB8` (true batched `B=8` BF16 GEMM), `uBf16Gemv1R` (`K % 256 == 0`), & `uBf16GemvAnyK` (universal BF16 GEMV for any `K % 64 == 0`)
    - `uRmsNormAdd(H, addOne, eps)`, `uGroupedRmsNorm(hc_count, H)`, & `uSwiGlu(I)`
    - `uHcMixReduce` / `uHcInjectAdd` / `uScaleSilu` (4-stream Gated Residual Hyper-Connections)
    - `uPleGate` / `uPleDilatedConvAdd` (51B N-gram Per-Layer Embedding with dilated depthwise Conv1d `K=4, dilation=3`)
@@ -31,10 +31,12 @@ Instead of hardcoding a single model's dimensions or tensor byte offsets, `omega
    - `uFaPrepKv` / `uFaPrepQ` / `uFaAttendSplitF32(nQ, nKV, hd)` / `uFaReduceGate(hd, attnGate)` (Split-K `S=8` Flash-Decoding for any GQA ratio `nQ/nKV` and `hd` in `{128, 256}`, gated or ungated)
    - `uGdnStepReal(nK, nV, gdnSigmoid)` (30 KiB SMEM Gated DeltaNet supporting both `silu` and `sigmoid` output gates)
    - `uBf16RescoreCands(H)` (Two-Pass Exact `lm_head`) & `uArgmaxEmbedStep(H)` (GPU-side ZOS argmax + embed + `pos++`)
-4. **`arboris_q4.om`, `runtime.om`, `runtime_qwen4.om` & `cli.om` — Full-APU + Default Live Arboris Runtime, First-Fit UVM Slab Allocator, CLI & OpenAI HTTP Server:**
+4. **`arboris_q4.om`, `runtime.om`, `runtime_qwen4.om`, `runtime_qwen4_b8.om` & `cli.om` — Full-APU + Default Live Arboris + True `B=8` Multi-Stream Runtime, First-Fit UVM Slab Allocator, CLI & OpenAI HTTP Server:**
    - **Full-APU (`20` ARMv9 CPU cores + `48` Blackwell SMs = `6,164` cores):** overlaps 16-core parallel NVMe 51B N-gram PLE lookup with Layer 0 on the 48 SMs, and splits the 248,320-vocab `lm_head` across all 20 CPU cores + 48 SMs simultaneously over uncached host-coherent NVLink-C2C shm.
+   - **True `B=8` Multi-Stream Batching (`runtime_qwen4_b8.om` + `ecServeB8`):** partitions the existing 6 GiB 128K KV cache into `8 × 16,384` tokens (0 extra KV RAM), runs batched `B=8` dense W4/BF16 GEMMs and a single-pass `B=8` `lm_head` over all `248,320` vocab, and automatically uses the fast zero-overhead `B=1` path at `C=1` and batched `B=8` prefill + decode at `C >= 2`.
    - **Live Arboris (ON by default):** 48-layer × 512-expert × top-10 online adaptive Space-Saving co-activation graph (`arboris_q4.om`), asynchronously overlapped with `lm_head` for zero critical-path latency.
    - `omega-engine inspect <model-dir>` (CPU-only: inspects any checkpoint, prints `ModelSpec`, tensor count, and kernel plan)
+   - `omega-engine ktest <model-dir>` (1-second bit-exact SM121 kernel parity verifier for `uW4Gemv4R512`, `uBf16Gemv4R`, `uW4GemmB8`, `uBf16GemmB8`)
    - `omega-engine run <model-dir> [gen_tokens]` (specializes kernels, loads weights by name, runs live GB10 decode)
    - `omega-engine serve <model-dir> [--port PORT] [--self-test]` (`GET /health`, `GET /v1/models`, `POST /v1/chat/completions`)
 
@@ -67,15 +69,15 @@ Measured on **NVIDIA DGX Spark (GB10, `sm_121`, driver `580.173.02`)** inside ex
 | Decode Speed (180B model, `N=1`) | **`13.64 tok/s`** (`73.29 ms/tok` self-test) / **`16.38–17.48 tok/s`** sustained HTTP decode |
 | Live Arboris Hit Rate (48L × 512E top-10) | **`41.6%`** cold → **`45.7%–47.9%`** sustained (`arboris_hit_pct_x10=457..479`, asynchronously overlapped with `lm_head`, 0 critical-path latency) |
 
-**Sustained Max-Concurrency HTTP Run (`C = 1, 4, 8, 16, 32` — `74/74` HTTP 200, `0` errors, `1,812` completion + `1,535` prompt tokens over `184.13 s` continuous load)** — exclusive quiet `spark-window` `20261125T015011Z-43b733` (`exit: 0`, [receipt JSON](evidence/gb10-omega-engine-qwen38-flash-next-sustained-c32.47b49d3e6faf60ccc343c1e9e1c5f103c630a361075712f71bf38ae21e1f6a1a.json)):
+**Sustained Max-Concurrency HTTP Run (`B=8` Batched + 4-Row SMEM Kernels, `C = 1, 4, 8, 16, 32` — `74/74` HTTP 200, `0` errors, `nvrm_errors_delta: 0`, exact `The capital of France is **Paris**.` across every wave, total wall time `129.30 s` vs `184.13 s` unbatched baseline = `1.42×` faster, `92.4%` mean GPU util, `38.15 W` mean GPU power, `29.5 GiB` free RAM)** — exclusive quiet `spark-window` `20261125T043620Z-00f445` (`exit: 0`, binary `988 KB` SHA-256 `f83075f79aa12575437e69716d8d5b17718510230c472d2e3f17b9216f40f093`, [receipt JSON](evidence/gb10-omega-engine-qwen38-flash-next-b8-sustained-c32.bb525e98791130b73aad740cb7b579dbbae44070376522418eef0a39b2d4a0bc.json); earlier unbatched baseline [receipt JSON](evidence/gb10-omega-engine-qwen38-flash-next-sustained-c32.47b49d3e6faf60ccc343c1e9e1c5f103c630a361075712f71bf38ae21e1f6a1a.json)):
 
-| Wave | Concurrency | Reqs OK / Total | Completion Tokens | Decode Speed | Aggregate (incl. Prefill) | Live Arboris Hit | GPU Temp / Power / Util |
-|---|---:|---:|---:|---:|---:|---:|---|
-| `warmup-C1` | `1` | `2 / 2` | `32` | `16.39 tok/s` | `7.88 tok/s` | `41.5%` | `49 °C` / `29.2 W` / `58%` |
-| `conc-C4` | `4` | `8 / 8` | `176` | **`17.48 tok/s`** | `9.69 tok/s` | **`47.9%`** | `51 °C` / `29.5 W` / `67%` |
-| `conc-C8` | `8` | `16 / 16` | `352` | `16.50 tok/s` | `9.40 tok/s` | `44.7%` | `55 °C` / `31.8 W` / `71%` |
-| `conc-C16` | `16` | `16 / 16` | `352` | `16.96 tok/s` | `9.51 tok/s` | `45.5%` | `58 °C` / `31.0 W` / `83%` |
-| `sustained-C32` | **`32`** | **`32 / 32`** | **`900`** | `16.38 tok/s` | **`10.29 tok/s`** | `45.7%` | `59 °C` / `32.9 W` / `70%` |
+| Wave | Concurrency | Reqs OK / Total | Baseline (`B=1`) | **New (`B=8` + 4-Row SMEM)** | Speedup | Live Arboris Hit |
+|---|---:|---:|---:|---:|---:|---:|
+| `warmup-C1` | `1` | `2 / 2` | `16.38 tok/s` decode | **`19.18 tok/s` decode** | **`+17.1%`** | `41.6%` |
+| `conc-C4` | `4` | `8 / 8` | `9.69 agg tok/s` | `7.62 agg tok/s` (`22.96 s`) | — | `46.5%` |
+| `conc-C8` | `8` | `16 / 16` | `9.85 agg tok/s` | **`14.83 agg tok/s`** (`23.73 s`) | **`+50.6%`** | `44.2%` |
+| `conc-C16` | `16` | `16 / 16` | `10.12 agg tok/s` | **`14.99 agg tok/s`** (`23.48 s`) | **`+48.1%`** | `44.1%` |
+| `sustained-C32` | **`32`** | **`32 / 32`** | `10.29 agg tok/s` (`86.4 s`) | **`16.19 agg tok/s`** (`54.91 s`, `30.5 tok/s` decode batch) | **`+57.3%`** | `44.4%` |
 
 #### B. Qwen 3.8 27B Dense — Generic Zero-CUDA Path
 
