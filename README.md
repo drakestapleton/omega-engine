@@ -64,8 +64,18 @@ Measured on **NVIDIA DGX Spark (GB10, `sm_121`, driver `580.173.02`)** inside ex
 | Execution Mode | **Full-APU** (`20` ARMv9 CPU cores: `10× X925 + 10× A725` + `48` Blackwell SMs = `6,164` cores simultaneously) + **Live Arboris ON by default** |
 | Memory Footprint (First-Fit UVM Slabs + NVMe 51B PLE) | Fits cleanly inside Spark's 128 GB unified memory (`~77 GiB` resident incl. 128K KV; `32.5 GiB` free headroom; `0 GiB` GPU RAM for 51B PLE table) |
 | Live Output | **`The capital of France is **Paris**.`** |
-| Decode Speed (180B model, `N=1`) | **`13.64 tok/s`** (`73.29 ms/tok`) |
-| Live Arboris Hit Rate (48L × 512E top-10) | **`41.6%`** (`arboris_hit_pct_x10=416`, asynchronously overlapped with `lm_head`, 0 critical-path latency) |
+| Decode Speed (180B model, `N=1`) | **`13.64 tok/s`** (`73.29 ms/tok` self-test) / **`16.38–17.48 tok/s`** sustained HTTP decode |
+| Live Arboris Hit Rate (48L × 512E top-10) | **`41.6%`** cold → **`45.7%–47.9%`** sustained (`arboris_hit_pct_x10=457..479`, asynchronously overlapped with `lm_head`, 0 critical-path latency) |
+
+**Sustained Max-Concurrency HTTP Run (`C = 1, 4, 8, 16, 32` — `74/74` HTTP 200, `0` errors, `1,812` completion + `1,535` prompt tokens over `184.13 s` continuous load)** — exclusive quiet `spark-window` `20261125T015011Z-43b733` (`exit: 0`, [receipt JSON](evidence/gb10-omega-engine-qwen38-flash-next-sustained-c32.47b49d3e6faf60ccc343c1e9e1c5f103c630a361075712f71bf38ae21e1f6a1a.json)):
+
+| Wave | Concurrency | Reqs OK / Total | Completion Tokens | Decode Speed | Aggregate (incl. Prefill) | Live Arboris Hit | GPU Temp / Power / Util |
+|---|---:|---:|---:|---:|---:|---:|---|
+| `warmup-C1` | `1` | `2 / 2` | `32` | `16.39 tok/s` | `7.88 tok/s` | `41.5%` | `49 °C` / `29.2 W` / `58%` |
+| `conc-C4` | `4` | `8 / 8` | `176` | **`17.48 tok/s`** | `9.69 tok/s` | **`47.9%`** | `51 °C` / `29.5 W` / `67%` |
+| `conc-C8` | `8` | `16 / 16` | `352` | `16.50 tok/s` | `9.40 tok/s` | `44.7%` | `55 °C` / `31.8 W` / `71%` |
+| `conc-C16` | `16` | `16 / 16` | `352` | `16.96 tok/s` | `9.51 tok/s` | `45.5%` | `58 °C` / `31.0 W` / `83%` |
+| `sustained-C32` | **`32`** | **`32 / 32`** | **`900`** | `16.38 tok/s` | **`10.29 tok/s`** | `45.7%` | `59 °C` / `32.9 W` / `70%` |
 
 #### B. Qwen 3.8 27B Dense — Generic Zero-CUDA Path
 
