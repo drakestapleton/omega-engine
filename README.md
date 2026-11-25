@@ -81,24 +81,23 @@ Measured on **NVIDIA DGX Spark (GB10, `sm_121`, driver `580.173.02`)** inside ex
 
 #### B. Qwen 3.8 27B Dense — Generic Zero-CUDA Path
 
-Measured on **NVIDIA DGX Spark (GB10, `sm_121`, driver `580.173.02`)** inside exclusive quiet `spark-window` `20261124T225745Z-ab9d16` (`exit: 0`, `nvrm_errors_delta: 0`) on `2026-11-24` — [receipt JSON](evidence/gb10-omega-engine-verify.78669f86b247f11f792f89de9cad471f5de52887f92925d58894805556241e13.json):
+Measured on **NVIDIA DGX Spark (GB10, `sm_121`, driver `580.173.02`)** inside exclusive quiet `spark-window` `20261125T093124Z-743d25` (`exit: 0`, `nvrm_errors_delta: 0`) on `2026-11-25` — [receipt JSON](evidence/gb10-omega-engine-27b-sol.8a85e227ccf96e63852857fcfaddb3cae4a8b63224f6e550258dbd7f096a7834.json) (prior baseline: [receipt JSON](evidence/gb10-omega-engine-verify.78669f86b247f11f792f89de9cad471f5de52887f92925d58894805556241e13.json)):
 
-| Metric | Measured Result (`omega-engine serve /home/aienalpha/models/qwen3.8-27b-fp8-017b9c7a --self-test`) |
+| Metric | Measured Result (`omega-engine run /home/aienalpha/models/qwen3.8-27b-fp8-017b9c7a 64`) |
 |---|---|
-| Binary | `omega-engine` (`671 KB` static ELF, `ldd: not a dynamic executable`, SHA-256 `e5e59e89be8001109198d17199b22673384de7603dc97654b5a6cfea75b97da4`) |
+| Binary | `omega-engine` (`903 KB` static ELF, `ldd: not a dynamic executable`, SHA-256 `03d1067096a76cc6c7b79d632f5de8e95ef314a5c8742f14eacec91b66bad8e6`) |
 | Dynamic Tensor Resolution | `1,251` tensors across `65` files resolved purely by canonical name (zero hardcoded offsets) |
-| Load + On-GPU W4 Quant + Runtime SM121 SASS Emit | `30.26 s` (`30,259 ms`) |
 | Live Output | `The capital of France is **Paris**.` |
-| Decode Speed (unbatched `N=1` generic path) | **`11.80 tok/s`** (`84.71 ms/tok`) |
+| Decode Speed (unbatched `N=1` generic path) | **`11.94 tok/s`** (`83.71 ms/tok`, up from `11.80 tok/s`) |
 | Kernel Driver Errors | **`nvrm_errors_delta: 0`** |
 
 ---
 
 ## Companion Model-Tuned Repositories (With Full Cross-Stack Benchmarks)
 
-For peak hand-tuned throughput (HMMA Tensor-Core chunked prefill, Split-K `S=16` batched FA2, Continuous Batch-4/8, Speculative Verify / Native MTP, Live Arboris, and Full-Chip GB10 APU `4.4+ T ops/s`), see the dedicated model repositories:
+For peak hand-tuned throughput (L2-Swizzled Super-HMMA Tensor-Core chunked prefill, Split-K `S=16` batched FA2, Coalesced HMMA Batch-8, Speculative Verify / Native MTP, Live Arboris, and Full-Chip GB10 APU `4.4+ T ops/s`), see the dedicated model repositories:
 - **[omega-qwen36-35b](https://github.com/drakestapleton/omega-qwen36-35b)** — Qwen 3.6 35B-A3B MoE (`67.47 tok/s` prose, `75.99 tok/s` MTP, `241.47 tok/s` Batch-8, `1,841 tok/s` prefill, vs. vLLM & SGLang).
-- **[omega-qwen38-27b](https://github.com/drakestapleton/omega-qwen38-27b)** — Qwen 3.8 27B Dense (`13.69 tok/s` prose, `42.00 tok/s` Batch-8, `42.11 tok/s` Spec-8, `268 tok/s` prefill, vs. TandemLLM & PyTorch).
+- **[omega-qwen38-27b](https://github.com/drakestapleton/omega-qwen38-27b)** — Qwen 3.8 27B Dense (`17.27 tok/s` Native MTP `PARITY=EXACT`, `50.83 tok/s` Batch-8, `50.76 tok/s` Spec-8, `474 tok/s` 1K / `460 tok/s` 4K / `404 tok/s` 16K prefill, vs. TandemLLM & PyTorch).
 
 ---
 

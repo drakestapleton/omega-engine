@@ -1,0 +1,22 @@
+{
+  "name": "gb10-omega-engine-27b-sol",
+  "omega_mv_commit": "1084bc08d074c9bd5ffaca895782aebbb320ff15",
+  "hardware": "NVIDIA DGX Spark GB10 (SM 12.1, driver 580.173.02)",
+  "window_id": "20261125T093124Z-743d25",
+  "receipt": "/home/drakestapleton/yardsticks/receipts/2026-11-25-engine-sol-27b-v2.json",
+  "verdict": "quiet machine",
+  "exit": 0,
+  "nvrm_errors_delta": 0,
+  "binary": {
+    "name": "omega-engine",
+    "size_kb": 903,
+    "sha256": "03d1067096a76cc6c7b79d632f5de8e95ef314a5c8742f14eacec91b66bad8e6"
+  },
+  "model": "/home/aienalpha/models/qwen3.8-27b-fp8-017b9c7a",
+  "output": "The capital of France is **Paris**.",
+  "gen_tokens": 8,
+  "avg_us_per_tok": 83714,
+  "tok_s": 11.94,
+  "wall_s": 39.95,
+  "gpu_W_mean": 7.656
+}
